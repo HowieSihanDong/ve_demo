@@ -86,28 +86,33 @@ def query_with_cache(prompt):
             if sql:
                 cache_hit = True
                 print("🚀  [Redis 缓存命中]")
-        except Exception:
-            pass
-    else:
-        if prompt in mock_cache:
-            sql = mock_cache[prompt]
-            cache_hit = True
-            print("📦  [内存缓存命中]")
+        except Exception as e:
+            print(f"⚠️  Redis 读取失败: {e}")
+    elif prompt in mock_cache:
+        sql = mock_cache[prompt]
+        cache_hit = True
+        print("📦  [内存缓存命中]")
     
     # 2. 未命中缓存，调用 AI
     if not sql:
         print("🤖  [AI 生成 SQL...]")
-        sql = get_sql_from_llm(prompt)
-        print(f"📄  [生成 SQL] {sql}")
+        try:
+            sql = get_sql_from_llm(prompt)
+            print(f"📄  [生成 SQL] {sql}")
+        except Exception as e:
+            print(f"❌  AI 调用失败: {e}")
+            return None
         
         # 存入缓存
         if redis_client:
             try:
                 redis_client.setex(cache_key, 3600, sql)
-            except Exception:
-                pass
+                print("💾  [已缓存到 Redis]")
+            except Exception as e:
+                print(f"⚠️  Redis 写入失败: {e}")
         else:
             mock_cache[prompt] = sql
+            print("💾  [已缓存到内存]")
     else:
         print(f"📄  [缓存 SQL] {sql}")
     
@@ -115,20 +120,23 @@ def query_with_cache(prompt):
     print("🔍  [执行查询...]")
     results = execute_sql(sql)
     
+    if results is None:
+        return None
+    
     return {
         'sql': sql,
         'data': results,
         'cache_hit': cache_hit,
-        'count': len(results) if results else 0
+        'count': len(results)
     }
 
 def print_results(results):
     """打印查询结果"""
-    if not results:
-        print("⚠️  无数据返回")
+    if results is None:
+        print("⚠️  查询失败，无数据返回")
         return
     
-    if not results['data']:
+    if not results.get('data'):
         print("📭  查询结果为空")
         return
     
